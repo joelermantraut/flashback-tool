@@ -1,10 +1,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
 #include <unistd.h>
+#include <windows.h>
+#include <time.h>
+
+#include "pipecomm.h"
+
+// Includes
 
 #define STRING_SIZE 80
+#define PIPE_NAME "FlashBackPipe"
+
+// Definitions
 
 typedef struct {
     int task;
@@ -14,10 +22,24 @@ typedef struct {
 } ArgsInfo;
 
 typedef struct {
+    int year;
+    int month;
+    int day;
+} Date;
+
+typedef struct {
+    int hour;
+    int minute;
+    int second;
+} Time;
+
+typedef struct {
     char task[120];
-    char date[10]; // Date in format YYYY-MM-DD
-    char time[5]; // Time in format HH:MM
+    Date date;
+    Time time;
 } TaskInfo;
+
+// Structures
 
 void print_help() {
     printf("Please provide the following arguments:\n");
@@ -57,19 +79,7 @@ int parse_arguments(int argc, char *argv[], ArgsInfo *args) {
     return 1;
 }
 
-pthread_t* allocate_threads_list(pthread_t *threads, int n) {
-    if (!threads) {
-        threads = malloc(n * sizeof(pthread_t));
-    } else {
-        threads = realloc(threads, n * sizeof(pthread_t));
-    }
-    if (!threads) {
-        printf("Error allocating memory for threads list\n");
-        return NULL;
-    }
-
-    return threads;
-}
+// Arguments parsing
 
 TaskInfo* allocate_task_list(TaskInfo *tasks, int n) {
     if (!tasks) {
@@ -89,11 +99,23 @@ char* allocate_string(int n) {
     return malloc(n * sizeof(char));
 }
 
+TaskInfo *free_task_from_memory(void *ptr, int start, int end) {
+    // Cannot free memory and realloc it cause it will lose the data
+    // So we create a new segment and copy the data we want to keep
+    // void *new_segment = malloc(end * sizeof(TaskInfo));
+    // memcpy(new_segment, ptr, start * sizeof(TaskInfo));
+    // memcpy(new_segment + start, ptr + end, (end - start) * sizeof(TaskInfo));
+    // free(ptr);
+    return NULL;
+}
+
 void free_memory(void *ptr) {
     /* Frees memory and checks for errors */
     free(ptr);
     ptr = NULL;
 }
+
+// Memory management
 
 FILE *open_file(char *filename, char *mode) {
     FILE *file = fopen(filename, mode);
@@ -127,16 +149,89 @@ TaskInfo *lift_data_file(char *data_filename, int *n_tasks) {
     return tasks;
 }
 
-int compare_date_with_now(char *date) {
-    return 1;
+// File management
+
+int compare_datetime_with_now(Date date_struct, Time time_struct) {
+    time_t now;
+    struct tm *tm_now;
+
+    time(&now);
+    tm_now = localtime(&now);
+
+    if (date_struct.year < (tm_now->tm_year + 1900)) return 0;
+    if (date_struct.year > (tm_now->tm_year + 1900)) return 1;
+    // If year is the same, check month
+
+    if (date_struct.month < (tm_now->tm_mon + 1)) return 0;
+    if (date_struct.month > (tm_now->tm_mon + 1)) return 1;
+    // If month is the same, check day
+
+    if (date_struct.day < tm_now->tm_mday) return 0;
+    if (date_struct.day > tm_now->tm_mday) return 1;
+    // If day is the same, check time
+
+    if (time_struct.hour < tm_now->tm_hour) return 0;
+    if (time_struct.hour > tm_now->tm_hour) return 1;
+    // If hour is the same, check minute
+
+    if (time_struct.minute < tm_now->tm_min) return 0;
+    if (time_struct.minute > tm_now->tm_min) return 1;
+    // If minute is the same, check second
+
+    if (time_struct.second < tm_now->tm_sec) return 0;
+    if (time_struct.second > tm_now->tm_sec) return 1;
+    // If second is the same, the task has to be executed now
+
+    return 0;
 }
 
-void add_task(char *data_filename, char *task, char *date) {
+Time convert_str_to_time(char *time_str) {
+    /*
+    Convert string in format HH:MM:SS to Time struct.
+    */
+    Time time = {0};
+    const char *delim = ":";
+    char *segment;
+
+    segment = strtok(time_str, ":");
+    time.hour = atoi(segment);
+    segment = strtok(NULL, ":");
+    time.minute = atoi(segment);
+    segment = strtok(NULL, ":");
+    time.second = atoi(segment);
+
+    return time;
+}
+
+Date convert_str_to_date(char *date_str) {
+    /*
+    Convert string in format MM/DD/YYYY to Date struct.
+    */
+    Date date = {0};
+    const char *delim = "/";
+    char *segment;
+
+    segment = strtok(date_str, ":");
+    date.month = atoi(segment);
+    segment = strtok(NULL, ":");
+    date.day = atoi(segment);
+    segment = strtok(NULL, ":");
+    date.year = atoi(segment);
+
+    return date;
+}
+
+// Date management
+
+void add_task(char *data_filename, char *task, char *date, char* time) {
     TaskInfo task_info;
 
+    Time time_struct = convert_str_to_time(time);
+    Date date_struct = convert_str_to_date(date);
+
     strcpy(task_info.task, task);
-    strcpy(task_info.date, date);
-    strcpy(task_info.time, "00:00");
+    task_info.date = date_struct;
+    task_info.time = time_struct;
 
     const char *mode = (access(data_filename, F_OK) == 0) ? "ab" : "wb";
 
@@ -145,24 +240,30 @@ void add_task(char *data_filename, char *task, char *date) {
     fclose(data_file);
 }
 
-// Function executed by each thread
-void* worker(void* arg) {
-    int id = *(int*)arg;
-    printf("Thread %d started\n", id);
-
-    for (int i = 0; i < 10; i++) {
-        sleep(1); // In seconds
+TaskInfo *check_tasks_status(TaskInfo *tasks, int *n_tasks) {
+    for (int i = 0; i < *n_tasks; i++) {
+        int status = compare_datetime_with_now(tasks[i].date, tasks[i].time);
+        if (!status) {
+            printf("Task %s is being executed\n", tasks[i].task);
+        } else {
+            tasks = free_task_from_memory(tasks, i, *n_tasks);
+            *n_tasks--;
+            printf("Task %s is not valid\n", tasks[i].task);
+        }
     }
-
-    printf("Thread %d finished\n", id);
-    pthread_exit(NULL);
+    return tasks;
 }
+
+void on_new_task(const char *message) {
+    TaskInfo *t = (TaskInfo *) message;
+    printf("Task #%d: %s (%s : %s)\n", t->task, t->date, t->time);
+}
+
+// Task management
 
 int main(int argc, char *argv[]) {
     char *DATA_FILENAME = ".tasks";    
     TaskInfo *tasks = NULL;
-    pthread_t *threads = NULL;
-    int n_threads = 0;
     int n_tasks = 0;
 
     ArgsInfo args = {0};
@@ -175,29 +276,18 @@ int main(int argc, char *argv[]) {
 
     if (!args.run) {
         printf("Adding task %s\n", argv[args.task]);
-        // if (args.date) strcpy(date, argv[args.date]);
-        // else strcpy(date, "Testing");
-        add_task(DATA_FILENAME, argv[args.task], argv[args.date]);
+        add_task(DATA_FILENAME, argv[args.task], argv[args.date], argv[args.time]);
         return 0;
     }
 
+    tasks = lift_data_file(DATA_FILENAME, &n_tasks);
     while (1) {
-        tasks = lift_data_file(DATA_FILENAME, &n_tasks);
-        for (int i = 0; i < n_tasks; i++) {
-            int status = compare_date_with_now(tasks[i].date);
-            if (!status) {
-                n_threads++;
-                threads = allocate_threads_list(threads, n_threads);
-                pthread_create(&threads[i], NULL, worker, &i);
-                printf("Task %s is being executed\n", tasks[i].task);
-            } else {
-                printf("Task %s is not valid\n", tasks[i].task);
-            }
-        }
-        sleep(1);
-    }
+        pipecomm_start_server(PIPE_NAME, on_new_task);
+        printf("Waiting for task...\n");
 
-    free_memory(threads);
+        sleep(1);
+        tasks = check_tasks_status(tasks, &n_tasks);
+    }
 
     return 0;
 }
