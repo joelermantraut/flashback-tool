@@ -4,6 +4,8 @@
 #include <pthread.h>
 #include <unistd.h>
 
+#define STRING_SIZE 80
+
 typedef struct {
     int task;
     int time;
@@ -12,9 +14,9 @@ typedef struct {
 } ArgsInfo;
 
 typedef struct {
-    char *task;
-    char *date; // Date in format YYYY-MM-DD
-    char *time; // Time in format HH:MM
+    char task[120];
+    char date[10]; // Date in format YYYY-MM-DD
+    char time[5]; // Time in format HH:MM
 } TaskInfo;
 
 void print_help() {
@@ -108,23 +110,39 @@ void close_file(FILE *file) {
     }
 }
 
-int lift_data_file(char *data_filename, TaskInfo *tasks) {
-    FILE* data_file = open_file(data_filename, (char *) 'r');
+TaskInfo *lift_data_file(char *data_filename, int *n_tasks) {
+    FILE* data_file = open_file(data_filename, (char *) "rb");
 
     fseek(data_file, 0L, SEEK_END);
-    int n_tasks = ftell(data_file) / sizeof(TaskInfo);
+    *n_tasks = ftell(data_file) / sizeof(TaskInfo);
+    fseek(data_file, 0L, SEEK_SET);
 
-    tasks = allocate_task_list(tasks, n_tasks);
+    TaskInfo *tasks = NULL;
+    tasks = allocate_task_list(tasks, *n_tasks);
 
-    fread(tasks, sizeof(TaskInfo), n_tasks, data_file);
-    
+    fread(tasks, sizeof(TaskInfo), *n_tasks, data_file);
+
     close_file(data_file);
 
-    return n_tasks;
+    return tasks;
 }
 
 int compare_date_with_now(char *date) {
     return 1;
+}
+
+void add_task(char *data_filename, char *task, char *date) {
+    TaskInfo task_info;
+
+    strcpy(task_info.task, task);
+    strcpy(task_info.date, date);
+    strcpy(task_info.time, "00:00");
+
+    const char *mode = (access(data_filename, F_OK) == 0) ? "ab" : "wb";
+
+    FILE* data_file = open_file(data_filename, mode);
+    fwrite(&task_info, sizeof(char), sizeof(TaskInfo), data_file);
+    fclose(data_file);
 }
 
 // Function executed by each thread
@@ -145,6 +163,7 @@ int main(int argc, char *argv[]) {
     TaskInfo *tasks = NULL;
     pthread_t *threads = NULL;
     int n_threads = 0;
+    int n_tasks = 0;
 
     ArgsInfo args = {0};
     int success = parse_arguments(argc, argv, &args);
@@ -154,19 +173,23 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // if (!args.run) {
-    //     // Add task to data file
-    //     return 0;
-    // }
+    if (!args.run) {
+        printf("Adding task %s\n", argv[args.task]);
+        // if (args.date) strcpy(date, argv[args.date]);
+        // else strcpy(date, "Testing");
+        add_task(DATA_FILENAME, argv[args.task], argv[args.date]);
+        return 0;
+    }
 
     while (1) {
-        int n_tasks = lift_data_file(DATA_FILENAME, tasks);
+        tasks = lift_data_file(DATA_FILENAME, &n_tasks);
         for (int i = 0; i < n_tasks; i++) {
             int status = compare_date_with_now(tasks[i].date);
             if (!status) {
                 n_threads++;
                 threads = allocate_threads_list(threads, n_threads);
                 pthread_create(&threads[i], NULL, worker, &i);
+                printf("Task %s is being executed\n", tasks[i].task);
             } else {
                 printf("Task %s is not valid\n", tasks[i].task);
             }
