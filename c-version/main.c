@@ -41,6 +41,11 @@ typedef struct {
 
 // Structures
 
+TaskInfo *tasks = NULL;
+int n_tasks = 0;
+
+// Variables
+
 void print_help() {
     printf("Please provide the following arguments:\n");
     printf("--task <task>\n");
@@ -99,13 +104,14 @@ char* allocate_string(int n) {
     return malloc(n * sizeof(char));
 }
 
-TaskInfo *free_task_from_memory(void *ptr, int start, int end) {
+TaskInfo *free_task_from_memory(void *ptr, int index, int n_tasks) {
     // Cannot free memory and realloc it cause it will lose the data
     // So we create a new segment and copy the data we want to keep
     // void *new_segment = malloc(end * sizeof(TaskInfo));
     // memcpy(new_segment, ptr, start * sizeof(TaskInfo));
     // memcpy(new_segment + start, ptr + end, (end - start) * sizeof(TaskInfo));
     // free(ptr);
+    // memmove(&ptr[index], &ptr[index + 1], (5 - index - 1) * sizeof(TaskInfo));
     return NULL;
 }
 
@@ -133,6 +139,11 @@ void close_file(FILE *file) {
 }
 
 TaskInfo *lift_data_file(char *data_filename, int *n_tasks) {
+    if (access(data_filename, F_OK)) {
+        *n_tasks = 0;
+        return NULL;
+    }
+
     FILE* data_file = open_file(data_filename, (char *) "rb");
 
     fseek(data_file, 0L, SEEK_END);
@@ -223,7 +234,7 @@ Date convert_str_to_date(char *date_str) {
 
 // Date management
 
-void add_task(char *data_filename, char *task, char *date, char* time) {
+TaskInfo add_task(char *data_filename, char *task, char *date, char* time) {
     TaskInfo task_info;
 
     Time time_struct = convert_str_to_time(time);
@@ -235,9 +246,11 @@ void add_task(char *data_filename, char *task, char *date, char* time) {
 
     const char *mode = (access(data_filename, F_OK) == 0) ? "ab" : "wb";
 
-    FILE* data_file = open_file(data_filename, mode);
-    fwrite(&task_info, sizeof(char), sizeof(TaskInfo), data_file);
-    fclose(data_file);
+    // FILE* data_file = open_file(data_filename, mode);
+    // fwrite(&task_info, sizeof(char), sizeof(TaskInfo), data_file);
+    // fclose(data_file);
+    
+    return task_info;
 }
 
 TaskInfo *check_tasks_status(TaskInfo *tasks, int *n_tasks) {
@@ -256,15 +269,18 @@ TaskInfo *check_tasks_status(TaskInfo *tasks, int *n_tasks) {
 
 void on_new_task(const char *message) {
     TaskInfo *t = (TaskInfo *) message;
-    printf("Task #%d: %s (%s : %s)\n", t->task, t->date, t->time);
+    printf("Appending task %s\n", t->task);
+
+    n_tasks++;
+
+    tasks = allocate_task_list(tasks, n_tasks);
+    tasks[n_tasks - 1] = *t;
 }
 
 // Task management
 
 int main(int argc, char *argv[]) {
-    char *DATA_FILENAME = ".tasks";    
-    TaskInfo *tasks = NULL;
-    int n_tasks = 0;
+    char *DATA_FILENAME = ".tasks";
 
     ArgsInfo args = {0};
     int success = parse_arguments(argc, argv, &args);
@@ -276,17 +292,24 @@ int main(int argc, char *argv[]) {
 
     if (!args.run) {
         printf("Adding task %s\n", argv[args.task]);
-        add_task(DATA_FILENAME, argv[args.task], argv[args.date], argv[args.time]);
+        TaskInfo task = add_task(DATA_FILENAME, argv[args.task], argv[args.date], argv[args.time]);
+        pipecomm_send_struct(PIPE_NAME, &task, sizeof(TaskInfo));
         return 0;
     }
 
     tasks = lift_data_file(DATA_FILENAME, &n_tasks);
     while (1) {
-        pipecomm_start_server(PIPE_NAME, on_new_task);
-        printf("Waiting for task...\n");
+        tasks = check_tasks_status(tasks, &n_tasks);
+
+        int status = pipecomm_start_server(PIPE_NAME, on_new_task);
+        if (!status) {
+            printf("Waiting for task...\n");
+        } else {
+            printf("Error starting server\n");
+            return -1;
+        }
 
         sleep(1);
-        tasks = check_tasks_status(tasks, &n_tasks);
     }
 
     return 0;
