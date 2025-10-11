@@ -40,32 +40,94 @@ int n_tasks = 0;
 // Variables
 
 void print_help() {
-    printf("Please provide the following arguments:\n");
-    printf("--task <task>\n");
-    printf("--time <time> or --date <date>\n");
+    printf("Usage:\n");
+    printf("  flashback.exe [options]\n\n");
+
+    printf("Available options:\n");
+    printf("  --task <text>         Specifies the name or description of the task.\n");
+    printf("                       Example: --task \"Check emails\"\n\n");
+
+    printf("  --time <minutes>      Sets the time in minutes from now when the task\n");
+    printf("                       should be executed.\n");
+    printf("                       Example: --time 30  (runs in 30 minutes)\n\n");
+
+    printf("  --date <MM/DD/YYYY>   Sets a specific date for the task to be executed.\n");
+    printf("                       Example: --date 10/25/2025\n\n");
+
+    printf("  --run                 Starts the scheduler in runtime mode.\n");
+    printf("                       This mode listens for new tasks through the pipe\n");
+    printf("                       and automatically executes them when their time arrives.\n\n");
+
+    printf("  --help                Displays this help message.\n\n");
+
+    printf("Examples:\n");
+    printf("  1) Add a task that runs in 15 minutes:\n");
+    printf("     program --task \"Turn off lights\" --time 15\n\n");
+
+    printf("  2) Add a task for a specific date:\n");
+    printf("     program --task \"Birthday reminder\" --date 10/25/2025\n\n");
+
+    printf("  3) Run the scheduler (listening for new tasks):\n");
+    printf("     program --run\n\n");
+
+    printf("Notes:\n");
+    printf("  - You must first run with --run to start the scheduler daemon.\n");
+    printf("  - You must provide either --time or --date along with --task.\n");
+}
+
+int is_integer(const char *str) {
+    /*
+    Only checks for positive integers, with no signs.
+    */
+    if (str == NULL || *str == '\0')
+        return 0;
+
+    if (atoi(str) > 0) return 1;
+    // Simpler and faster way
+
+    for (int i = 0; str[i] != '\0'; i++) {
+        if (!isdigit((unsigned char)str[i])) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+int is_arg_valid(int argc, char *argv[], int arg_index, char *arg_type) {
+    if (arg_index >= argc || arg_index < 0) return 0;
+    // Redundant check
+
+    int arg_value_index = arg_index + 1;
+    char *arg_value = argv[arg_value_index];
+
+    if (strcmp(arg_type, "string") == 0) {
+        if (strlen(arg_value) > 0 && arg_value[0] != '-') return 1;
+        // Checks that the string is valid, and is not another argument
+    } else if (strcmp(arg_type, "int") == 0) {
+        return is_integer(arg_value);
+    }
 }
 
 int parse_arguments(int argc, char *argv[], ArgsInfo *args) {
-    // if ((argc % 2) != 1) {
-    //     printf("Invalid number of arguments\n");
-    //     return 1;
-    // }
-    // This allows us to check for the next argument after the current one
-    // without having to check for the end of the array
-
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--task") == 0) {
             args->task = i + 1;
+            if (!is_arg_valid(argc, argv, i, "string")) return 0;
         } else if (strcmp(argv[i], "--time") == 0) {
             args->time = i + 1;
+            if (!is_arg_valid(argc, argv, i, "int")) return 0;
         } else if (strcmp(argv[i], "--date") == 0) {
             args->date = i + 1;
+            if (!is_arg_valid(argc, argv, i, "string")) return 0;
         } else if (strcmp(argv[i], "--run") == 0) {
             args->run = 1;
             return 1;
         } else if (strcmp(argv[i], "--help") == 0) {
-            print_help();
             return 0;
+        } else {
+            if (argv[i][0] == '-') return 0;
+            // Unknown argument
         }
     }
 
@@ -201,13 +263,16 @@ time_t convert_date_to_time(Date date) {
 }
 
 time_t get_final_time(time_t date, int minutes) {
+    time_t final_time = date + minutes * 60;
+    if (final_time <= 0) return 0;
+
     time_t now = time(NULL);
-    time_t future = now + date + minutes * 60;
+    return now + final_time;
 }
 
 // Date management
 
-TaskInfo send_task(char *data_filename, char *task, char *date, char* time) {
+TaskInfo get_task(char *data_filename, char *task, char *date, char* time) {
     TaskInfo task_info;
 
     int minutes = convert_str_to_time(time);
@@ -294,11 +359,17 @@ int main(int argc, char *argv[]) {
 
     if (!args.run) {
         printf("Adding task %s\n", argv[args.task]);
-        TaskInfo task = send_task(DATA_FILENAME, argv[args.task], argv[args.date], argv[args.time]);
+        TaskInfo task = get_task(DATA_FILENAME, argv[args.task], argv[args.date], argv[args.time]);
+        if (task.time <= 0) {
+            print_help();
+            return -1;
+        }
+
         pipecomm_send_struct(PIPE_NAME, &task, sizeof(TaskInfo));
         return 0;
     }
 
+    // TODO: Check already running daemon
     tasks = lift_data_file(DATA_FILENAME, &n_tasks);
     while (1) {
         tasks = check_tasks_status(tasks, &n_tasks);
