@@ -29,7 +29,6 @@ typedef struct {
 
 typedef struct {
     char task[120];
-    Date date;
     time_t time;
 } TaskInfo;
 
@@ -92,11 +91,8 @@ TaskInfo* allocate_task_list(TaskInfo *tasks, int n) {
     } else {
         tasks = realloc(tasks, n * sizeof(TaskInfo));
     }
-    if (!tasks) {
-        printf("Error allocating memory for threads list\n");
-        return NULL;
-    }
-
+    
+    if (!tasks) printf("Error allocating memory for tasks\n");
     return tasks;
 }
 
@@ -108,6 +104,7 @@ TaskInfo *free_task_from_memory(TaskInfo *tasks, int index, int n_tasks) {
     for (int i = index; i < n_tasks - 1; i++) {
         tasks[i] = tasks[i + 1];
     }
+    // Moves all tasks to the left and resizes the memory
     return realloc(tasks, (n_tasks - 1) * sizeof(TaskInfo));
 }
 
@@ -158,23 +155,18 @@ TaskInfo *lift_data_file(char *data_filename, int *n_tasks) {
 
 // File management
 
-int compare_datetime_with_now(Date date_struct, time_t time_struct) {
+int compare_datetime_with_now(time_t time_struct) {
     time_t now = time(NULL);
 
     if (difftime(time_struct, now) <= 0) return 1;
     return 0;
 }
 
-time_t convert_str_to_time(char *time_str) {
+int convert_str_to_time(char *time_str) {
     /*
     Convert string in minutes.
     */
-    int minutes = atoi(time_str);
-
-    time_t now = time(NULL);
-    time_t future = now + minutes * 60;
-
-    return future;
+    return atoi(time_str);
 }
 
 Date convert_str_to_date(char *date_str) {
@@ -195,17 +187,36 @@ Date convert_str_to_date(char *date_str) {
     return date;
 }
 
+time_t convert_date_to_time(Date date) {
+    struct tm timeinfo = {0};
+
+    timeinfo.tm_year = date.year - 1900; // Year since 1900
+    timeinfo.tm_mon = date.month - 1;    // Month from 0 to 11
+    timeinfo.tm_mday = date.day;         // Day of the month
+    timeinfo.tm_hour = 0;
+    timeinfo.tm_min = 0;
+    timeinfo.tm_sec = 0;
+
+    return mktime(&timeinfo);
+}
+
+time_t get_final_time(time_t date, int minutes) {
+    time_t now = time(NULL);
+    time_t future = now + date + minutes * 60;
+}
+
 // Date management
 
 TaskInfo send_task(char *data_filename, char *task, char *date, char* time) {
     TaskInfo task_info;
 
-    time_t time_struct = convert_str_to_time(time);
+    int minutes = convert_str_to_time(time);
     Date date_struct = convert_str_to_date(date);
+    time_t date_time_struct = convert_date_to_time(date_struct);
+    time_t final_time = get_final_time(date_time_struct, minutes);
 
     strcpy(task_info.task, task);
-    task_info.date = date_struct;
-    task_info.time = time_struct;
+    task_info.time = final_time;
 
     const char *mode = (access(data_filename, F_OK) == 0) ? "ab" : "wb";
 
@@ -218,27 +229,34 @@ TaskInfo send_task(char *data_filename, char *task, char *date, char* time) {
 
 TaskInfo *append_task(TaskInfo *tasks, int *n_tasks, TaskInfo task) {
     tasks = allocate_task_list(tasks, *n_tasks);
-    tasks[*n_tasks] = task;
-    *n_tasks++;
+
+    strcpy(tasks[*n_tasks - 1].task, task.task);
+    tasks[*n_tasks - 1].time = task.time;
+
+    printf("Task '%s' appended\n", task.task);
 
     return tasks;
 }
 
 TaskInfo *check_tasks_status(TaskInfo *tasks, int *n_tasks) {
-    if (*n_tasks == 0 || tasks == NULL)
+    if (*n_tasks == 0 || tasks == NULL) {
+        printf("No tasks to check\n");
         return tasks;
+    }
+
+    printf("Ready to check\n");
 
     int i = 0;
     while (i < *n_tasks) {
-        int status = compare_datetime_with_now(tasks[i].date, tasks[i].time);
+        int status = compare_datetime_with_now(tasks[i].time);
         // status == 0 => task after now
         // status == 1 => task before now or now
 
-        printf("Checking task %s\n", tasks[i].task);
+        printf("Checking task %s - status: %d\n", tasks[i].task, status);
 
         if (status) {
             show_task(tasks[i].task);
-            printf("Task %s is not valid (removing)\n", tasks[i].task);
+            printf("Removing task %s\n", tasks[i].task);
 
             tasks = free_task_from_memory(tasks, i, *n_tasks);
             (*n_tasks)--;
@@ -246,7 +264,7 @@ TaskInfo *check_tasks_status(TaskInfo *tasks, int *n_tasks) {
             continue;
         }
 
-        i++; // Solo avanzamos si no se eliminó
+        i++;
     }
 
     return tasks;
@@ -254,9 +272,11 @@ TaskInfo *check_tasks_status(TaskInfo *tasks, int *n_tasks) {
 
 void on_new_task(const char *message) {
     TaskInfo *t = (TaskInfo *) message;
-    printf("Appending task %s\n", t->task);
+    printf("Appending task '%s'\n", t->task);
 
-    append_task(tasks, &n_tasks, *t);
+    n_tasks++;
+
+    tasks = append_task(tasks, &n_tasks, *t);
 }
 
 // Task management
@@ -285,7 +305,7 @@ int main(int argc, char *argv[]) {
 
         int status = pipecomm_start_server(PIPE_NAME, on_new_task);
         if (!status) {
-            printf("Waiting for task...\n");
+            printf("Tasks %d\n", n_tasks);
         } else {
             printf("Error starting server\n");
             return -1;
