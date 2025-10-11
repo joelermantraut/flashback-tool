@@ -1,3 +1,5 @@
+// TODO: Add logging system
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -141,8 +143,8 @@ int parse_arguments(int argc, char *argv[], ArgsInfo *args) {
 
 // Arguments parsing
 
-void show_task(char *task) {
-    printf("Task %s executed\n", task);
+void send_notification(char *title, char *message) {
+    MessageBox(NULL, message, title, MB_OK | MB_ICONINFORMATION);
 }
 
 // Notification management
@@ -178,7 +180,7 @@ void free_memory(void *ptr) {
 
 // Memory management
 
-FILE *open_file(char *filename, char *mode) {
+FILE *open_file(char *filename, const char *mode) {
     FILE *file = fopen(filename, mode);
     if (!file) {
         printf("Error opening file %s\n", filename);
@@ -320,7 +322,7 @@ TaskInfo *check_tasks_status(TaskInfo *tasks, int *n_tasks) {
         printf("Checking task %s - status: %d\n", tasks[i].task, status);
 
         if (status) {
-            show_task(tasks[i].task);
+            send_notification("Flashback", tasks[i].task);
             printf("Removing task %s\n", tasks[i].task);
 
             tasks = free_task_from_memory(tasks, i, *n_tasks);
