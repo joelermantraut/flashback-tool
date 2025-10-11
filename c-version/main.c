@@ -285,9 +285,9 @@ TaskInfo get_task(char *data_filename, char *task, char *date, char* time) {
 
     const char *mode = (access(data_filename, F_OK) == 0) ? "ab" : "wb";
 
-    // FILE* data_file = open_file(data_filename, mode);
-    // fwrite(&task_info, sizeof(char), sizeof(TaskInfo), data_file);
-    // fclose(data_file);
+    FILE* data_file = open_file(data_filename, mode);
+    fwrite(&task_info, sizeof(char), sizeof(TaskInfo), data_file);
+    fclose(data_file);
     
     return task_info;
 }
