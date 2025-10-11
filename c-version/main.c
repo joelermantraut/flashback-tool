@@ -22,6 +22,7 @@ typedef struct {
     int time;
     int date;
     int list;
+    int remove;
     int run;
 } ArgsInfo;
 
@@ -58,6 +59,9 @@ void print_help() {
 
     printf("  --date <MM/DD/YYYY>   Sets a specific date for the task to be executed.\n");
     printf("                       Example: --date 10/25/2025\n\n");
+
+    printf("  --list                Lists all scheduled tasks.\n\n");
+    printf("  --remove <text>       Removes a task from the list.\n");
 
     printf("  --run                 Starts the scheduler in runtime mode.\n");
     printf("                       This mode listens for new tasks through the pipe\n");
@@ -127,6 +131,10 @@ int parse_arguments(int argc, char *argv[], ArgsInfo *args) {
             if (!is_arg_valid(argc, argv, i, "string")) return 0;
         } else if (strcmp(argv[i], "--list") == 0) {
             args->list = 1;
+            return 1;
+        } else if (strcmp(argv[i], "--remove") == 0) {
+            args->remove = i + 1;
+            if (!is_arg_valid(argc, argv, i, "string")) return 0;
             return 1;
         } else if (strcmp(argv[i], "--run") == 0) {
             args->run = 1;
@@ -378,6 +386,12 @@ TaskInfo *check_tasks_status(char *data_filename, TaskInfo *tasks, int *n_tasks)
 }
 
 void on_new_task(const char *message) {
+    if (strlen(message) == 6) {
+        printf("Task removed, reloading from file\n");
+        tasks = lift_data_file(DATA_FILENAME, &n_tasks);
+        return;
+    }
+
     TaskInfo *t = (TaskInfo *) message;
     printf("Appending task '%s'\n", t->task);
 
@@ -401,6 +415,25 @@ void list_tasks(char *data_filename) {
     free_memory(tasks);
 }
 
+void remove_task(char *data_filename, char *task) {
+    TaskInfo *tasks = lift_data_file(data_filename, &n_tasks);
+    if (tasks == NULL) {
+        printf("No tasks to remove\n");
+        return;
+    }
+
+    for (int i = 0; i < n_tasks; i++) {
+        if (strcmp(tasks[i].task, task) == 0) {
+            tasks = free_task_from_memory(tasks, i, n_tasks);
+            n_tasks--;
+            save_tasks(data_filename, "wb", tasks, n_tasks);
+            pipecomm_send_struct(PIPE_NAME, "remove", sizeof("remove"));
+            printf("Task removed\n");
+            return;
+        }
+    }
+}
+
 // Task management
 
 int main(int argc, char *argv[]) {
@@ -415,6 +448,11 @@ int main(int argc, char *argv[]) {
     if (!args.run) {
         if (args.list) {
             list_tasks(DATA_FILENAME);
+            return 0;
+        }
+
+        if (args.remove) {
+            remove_task(DATA_FILENAME, argv[args.remove]);
             return 0;
         }
 
