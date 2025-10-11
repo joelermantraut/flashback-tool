@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <process.h>
 #include <windows.h>
 #include <time.h>
 
@@ -144,9 +145,24 @@ int parse_arguments(int argc, char *argv[], ArgsInfo *args) {
 
 // Arguments parsing
 
-void send_notification(char *title, char *message) {
-    MessageBox(NULL, message, title, MB_OK | MB_ICONINFORMATION);
+void __cdecl notification_thread(void *param) {
+    char **args = (char **)param;
+    MessageBox(NULL, args[1], args[0], MB_OK | MB_ICONINFORMATION);
+    free(args[0]);
+    free(args[1]);
+    free(args);
+    _endthread();
 }
+
+void send_notification(const char *title, const char *message) {
+    char **args = malloc(2 * sizeof(char *));
+    args[0] = _strdup(title);
+    args[1] = _strdup(message);
+
+    _beginthread(notification_thread, 0, args);
+}
+// See https://learn.microsoft.com/en-us/cpp/c-runtime-library/crt-library-features?view=msvc-170
+// for more details
 
 // Notification management
 
