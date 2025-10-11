@@ -28,15 +28,9 @@ typedef struct {
 } Date;
 
 typedef struct {
-    int hour;
-    int minute;
-    int second;
-} Time;
-
-typedef struct {
     char task[120];
     Date date;
-    Time time;
+    time_t time;
 } TaskInfo;
 
 // Structures
@@ -86,6 +80,12 @@ int parse_arguments(int argc, char *argv[], ArgsInfo *args) {
 
 // Arguments parsing
 
+void show_task(char *task) {
+    printf("Task %s executed\n", task);
+}
+
+// Notification management
+
 TaskInfo* allocate_task_list(TaskInfo *tasks, int n) {
     if (!tasks) {
         tasks = malloc(n * sizeof(TaskInfo));
@@ -104,15 +104,11 @@ char* allocate_string(int n) {
     return malloc(n * sizeof(char));
 }
 
-TaskInfo *free_task_from_memory(void *ptr, int index, int n_tasks) {
-    // Cannot free memory and realloc it cause it will lose the data
-    // So we create a new segment and copy the data we want to keep
-    // void *new_segment = malloc(end * sizeof(TaskInfo));
-    // memcpy(new_segment, ptr, start * sizeof(TaskInfo));
-    // memcpy(new_segment + start, ptr + end, (end - start) * sizeof(TaskInfo));
-    // free(ptr);
-    // memmove(&ptr[index], &ptr[index + 1], (5 - index - 1) * sizeof(TaskInfo));
-    return NULL;
+TaskInfo *free_task_from_memory(TaskInfo *tasks, int index, int n_tasks) {
+    for (int i = index; i < n_tasks - 1; i++) {
+        tasks[i] = tasks[i + 1];
+    }
+    return realloc(tasks, (n_tasks - 1) * sizeof(TaskInfo));
 }
 
 void free_memory(void *ptr) {
@@ -162,56 +158,23 @@ TaskInfo *lift_data_file(char *data_filename, int *n_tasks) {
 
 // File management
 
-int compare_datetime_with_now(Date date_struct, Time time_struct) {
-    time_t now;
-    struct tm *tm_now;
+int compare_datetime_with_now(Date date_struct, time_t time_struct) {
+    time_t now = time(NULL);
 
-    time(&now);
-    tm_now = localtime(&now);
-
-    if (date_struct.year < (tm_now->tm_year + 1900)) return 0;
-    if (date_struct.year > (tm_now->tm_year + 1900)) return 1;
-    // If year is the same, check month
-
-    if (date_struct.month < (tm_now->tm_mon + 1)) return 0;
-    if (date_struct.month > (tm_now->tm_mon + 1)) return 1;
-    // If month is the same, check day
-
-    if (date_struct.day < tm_now->tm_mday) return 0;
-    if (date_struct.day > tm_now->tm_mday) return 1;
-    // If day is the same, check time
-
-    if (time_struct.hour < tm_now->tm_hour) return 0;
-    if (time_struct.hour > tm_now->tm_hour) return 1;
-    // If hour is the same, check minute
-
-    if (time_struct.minute < tm_now->tm_min) return 0;
-    if (time_struct.minute > tm_now->tm_min) return 1;
-    // If minute is the same, check second
-
-    if (time_struct.second < tm_now->tm_sec) return 0;
-    if (time_struct.second > tm_now->tm_sec) return 1;
-    // If second is the same, the task has to be executed now
-
+    if (difftime(time_struct, now) <= 0) return 1;
     return 0;
 }
 
-Time convert_str_to_time(char *time_str) {
+time_t convert_str_to_time(char *time_str) {
     /*
-    Convert string in format HH:MM:SS to Time struct.
+    Convert string in minutes.
     */
-    Time time = {0};
-    const char *delim = ":";
-    char *segment;
+    int minutes = atoi(time_str);
 
-    segment = strtok(time_str, ":");
-    time.hour = atoi(segment);
-    segment = strtok(NULL, ":");
-    time.minute = atoi(segment);
-    segment = strtok(NULL, ":");
-    time.second = atoi(segment);
+    time_t now = time(NULL);
+    time_t future = now + minutes * 60;
 
-    return time;
+    return future;
 }
 
 Date convert_str_to_date(char *date_str) {
@@ -234,10 +197,10 @@ Date convert_str_to_date(char *date_str) {
 
 // Date management
 
-TaskInfo add_task(char *data_filename, char *task, char *date, char* time) {
+TaskInfo send_task(char *data_filename, char *task, char *date, char* time) {
     TaskInfo task_info;
 
-    Time time_struct = convert_str_to_time(time);
+    time_t time_struct = convert_str_to_time(time);
     Date date_struct = convert_str_to_date(date);
 
     strcpy(task_info.task, task);
@@ -253,17 +216,39 @@ TaskInfo add_task(char *data_filename, char *task, char *date, char* time) {
     return task_info;
 }
 
+TaskInfo *append_task(TaskInfo *tasks, int *n_tasks, TaskInfo task) {
+    tasks = allocate_task_list(tasks, *n_tasks);
+    tasks[*n_tasks] = task;
+    *n_tasks++;
+
+    return tasks;
+}
+
 TaskInfo *check_tasks_status(TaskInfo *tasks, int *n_tasks) {
-    for (int i = 0; i < *n_tasks; i++) {
+    if (*n_tasks == 0 || tasks == NULL)
+        return tasks;
+
+    int i = 0;
+    while (i < *n_tasks) {
         int status = compare_datetime_with_now(tasks[i].date, tasks[i].time);
-        if (!status) {
-            printf("Task %s is being executed\n", tasks[i].task);
-        } else {
+        // status == 0 => task after now
+        // status == 1 => task before now or now
+
+        printf("Checking task %s\n", tasks[i].task);
+
+        if (status) {
+            show_task(tasks[i].task);
+            printf("Task %s is not valid (removing)\n", tasks[i].task);
+
             tasks = free_task_from_memory(tasks, i, *n_tasks);
-            *n_tasks--;
-            printf("Task %s is not valid\n", tasks[i].task);
+            (*n_tasks)--;
+
+            continue;
         }
+
+        i++; // Solo avanzamos si no se eliminó
     }
+
     return tasks;
 }
 
@@ -271,10 +256,7 @@ void on_new_task(const char *message) {
     TaskInfo *t = (TaskInfo *) message;
     printf("Appending task %s\n", t->task);
 
-    n_tasks++;
-
-    tasks = allocate_task_list(tasks, n_tasks);
-    tasks[n_tasks - 1] = *t;
+    append_task(tasks, &n_tasks, *t);
 }
 
 // Task management
@@ -292,7 +274,7 @@ int main(int argc, char *argv[]) {
 
     if (!args.run) {
         printf("Adding task %s\n", argv[args.task]);
-        TaskInfo task = add_task(DATA_FILENAME, argv[args.task], argv[args.date], argv[args.time]);
+        TaskInfo task = send_task(DATA_FILENAME, argv[args.task], argv[args.date], argv[args.time]);
         pipecomm_send_struct(PIPE_NAME, &task, sizeof(TaskInfo));
         return 0;
     }
@@ -311,6 +293,8 @@ int main(int argc, char *argv[]) {
 
         sleep(1);
     }
+
+    free_memory(tasks);
 
     return 0;
 }
