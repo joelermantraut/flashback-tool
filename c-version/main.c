@@ -38,6 +38,7 @@ typedef struct {
 
 TaskInfo *tasks = NULL;
 int n_tasks = 0;
+char *DATA_FILENAME = ".tasks";
 
 // Variables
 
@@ -274,6 +275,22 @@ time_t get_final_time(time_t date, int minutes) {
 
 // Date management
 
+void save_tasks(char *data_filename, const char *mode, TaskInfo *tasks, int n_tasks) {
+    if (tasks == NULL) {
+        printf("No tasks to save, removing file\n");
+        int status = remove(data_filename);
+        if (status != 0) {
+            printf("Error removing file %s\n", data_filename);
+        }
+        return;
+    }
+
+    FILE* data_file = open_file(data_filename, mode);
+    fwrite(tasks, sizeof(char), sizeof(TaskInfo), data_file);
+    fclose(data_file);
+    printf("Tasks saved\n");
+}
+
 TaskInfo get_task(char *data_filename, char *task, char *date, char* time) {
     TaskInfo task_info;
 
@@ -286,10 +303,6 @@ TaskInfo get_task(char *data_filename, char *task, char *date, char* time) {
     task_info.time = final_time;
 
     const char *mode = (access(data_filename, F_OK) == 0) ? "ab" : "wb";
-
-    FILE* data_file = open_file(data_filename, mode);
-    fwrite(&task_info, sizeof(char), sizeof(TaskInfo), data_file);
-    fclose(data_file);
     
     return task_info;
 }
@@ -302,10 +315,12 @@ TaskInfo *append_task(TaskInfo *tasks, int *n_tasks, TaskInfo task) {
 
     printf("Task '%s' appended\n", task.task);
 
+    save_tasks(DATA_FILENAME, "ab", tasks, *n_tasks);
+
     return tasks;
 }
 
-TaskInfo *check_tasks_status(TaskInfo *tasks, int *n_tasks) {
+TaskInfo *check_tasks_status(char *data_filename, TaskInfo *tasks, int *n_tasks) {
     if (*n_tasks == 0 || tasks == NULL) {
         printf("No tasks to check\n");
         return tasks;
@@ -325,8 +340,13 @@ TaskInfo *check_tasks_status(TaskInfo *tasks, int *n_tasks) {
             send_notification("Flashback", tasks[i].task);
             printf("Removing task %s\n", tasks[i].task);
 
+            printf("Tasks pointer %p\n", tasks);
             tasks = free_task_from_memory(tasks, i, *n_tasks);
             (*n_tasks)--;
+            printf("Tasks pointer %p\n", tasks);
+
+            printf("Saving tasks - %d tasks\n", *n_tasks);
+            save_tasks(data_filename, "wb", tasks, *n_tasks);
 
             continue;
         }
@@ -349,8 +369,6 @@ void on_new_task(const char *message) {
 // Task management
 
 int main(int argc, char *argv[]) {
-    char *DATA_FILENAME = ".tasks";
-
     ArgsInfo args = {0};
     int success = parse_arguments(argc, argv, &args);
 
@@ -380,7 +398,7 @@ int main(int argc, char *argv[]) {
 
     tasks = lift_data_file(DATA_FILENAME, &n_tasks);
     while (1) {
-        tasks = check_tasks_status(tasks, &n_tasks);
+        tasks = check_tasks_status(DATA_FILENAME, tasks, &n_tasks);
 
         int status = pipecomm_start_server(PIPE_NAME, on_new_task);
         if (!status) {
