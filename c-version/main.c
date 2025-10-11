@@ -369,7 +369,13 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    // TODO: Check already running daemon
+    char path[256];
+    if (check_pipe_server(path, PIPE_NAME)) {
+        printf("Error: Pipe server already running\n");
+        return -1;
+    }
+    // If the pipe server is already running, exit
+
     tasks = lift_data_file(DATA_FILENAME, &n_tasks);
     while (1) {
         tasks = check_tasks_status(tasks, &n_tasks);
