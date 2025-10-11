@@ -21,6 +21,7 @@ typedef struct {
     int task;
     int time;
     int date;
+    int list;
     int run;
 } ArgsInfo;
 
@@ -124,6 +125,9 @@ int parse_arguments(int argc, char *argv[], ArgsInfo *args) {
         } else if (strcmp(argv[i], "--date") == 0) {
             args->date = i + 1;
             if (!is_arg_valid(argc, argv, i, "string")) return 0;
+        } else if (strcmp(argv[i], "--list") == 0) {
+            args->list = 1;
+            return 1;
         } else if (strcmp(argv[i], "--run") == 0) {
             args->run = 1;
             return 1;
@@ -382,6 +386,21 @@ void on_new_task(const char *message) {
     tasks = append_task(tasks, &n_tasks, *t);
 }
 
+void list_tasks(char *data_filename) {
+    TaskInfo *tasks = lift_data_file(data_filename, &n_tasks);
+    if (tasks == NULL) {
+        printf("No tasks to list\n");
+        return;
+    }
+
+    printf("Tasks:\n");
+    for (int i = 0; i < n_tasks; i++) {
+        printf("%s - %s\n", tasks[i].task, ctime(&tasks[i].time));
+    }
+
+    free_memory(tasks);
+}
+
 // Task management
 
 int main(int argc, char *argv[]) {
@@ -394,6 +413,11 @@ int main(int argc, char *argv[]) {
     }
 
     if (!args.run) {
+        if (args.list) {
+            list_tasks(DATA_FILENAME);
+            return 0;
+        }
+
         printf("Adding task %s\n", argv[args.task]);
         TaskInfo task = get_task(DATA_FILENAME, argv[args.task], argv[args.date], argv[args.time]);
         if (task.time <= 0) {
