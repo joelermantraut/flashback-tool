@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include "pipecomm.h"
+#include "logger.h"
 
 // Includes
 
@@ -185,7 +186,7 @@ TaskInfo* allocate_task_list(TaskInfo *tasks, int n) {
         tasks = realloc(tasks, n * sizeof(TaskInfo));
     }
     
-    if (!tasks) printf("Error allocating memory for tasks\n");
+    if (!tasks) log_error("Error allocating memory for tasks\n");
     return tasks;
 }
 
@@ -212,7 +213,7 @@ void free_memory(void *ptr) {
 FILE *open_file(char *filename, const char *mode) {
     FILE *file = fopen(filename, mode);
     if (!file) {
-        printf("Error opening file %s\n", filename);
+        log_error("Error opening file %s\n", filename);
         return NULL;
     }
     return file;
@@ -220,7 +221,7 @@ FILE *open_file(char *filename, const char *mode) {
 
 void close_file(FILE *file) {
     if (fclose(file) != 0) {
-        printf("Error closing file\n");
+        log_error("Error closing file\n");
     }
 }
 
@@ -305,10 +306,10 @@ time_t get_final_time(time_t date, int minutes) {
 
 void save_tasks(char *data_filename, const char *mode, TaskInfo *tasks, int n_tasks) {
     if (tasks == NULL) {
-        printf("No tasks to save, removing file\n");
+        log_info("No tasks to save, removing file\n");
         int status = remove(data_filename);
         if (status != 0) {
-            printf("Error removing file %s\n", data_filename);
+            log_error("Error removing file %s\n", data_filename);
         }
         return;
     }
@@ -316,7 +317,7 @@ void save_tasks(char *data_filename, const char *mode, TaskInfo *tasks, int n_ta
     FILE* data_file = open_file(data_filename, mode);
     fwrite(tasks, sizeof(char), sizeof(TaskInfo), data_file);
     fclose(data_file);
-    printf("Tasks saved\n");
+    log_info("Tasks saved\n");
 }
 
 TaskInfo get_task(char *data_filename, char *task, char *date, char* time) {
@@ -341,7 +342,7 @@ TaskInfo *append_task(TaskInfo *tasks, int *n_tasks, TaskInfo task) {
     strcpy(tasks[*n_tasks - 1].task, task.task);
     tasks[*n_tasks - 1].time = task.time;
 
-    printf("Task '%s' appended\n", task.task);
+    log_info("Task '%s' appended\n", task.task);
 
     save_tasks(DATA_FILENAME, "ab", tasks, *n_tasks);
 
@@ -350,11 +351,11 @@ TaskInfo *append_task(TaskInfo *tasks, int *n_tasks, TaskInfo task) {
 
 TaskInfo *check_tasks_status(char *data_filename, TaskInfo *tasks, int *n_tasks) {
     if (*n_tasks == 0 || tasks == NULL) {
-        printf("No tasks to check\n");
+        log_info("No tasks to check\n");
         return tasks;
     }
 
-    printf("Ready to check\n");
+    log_info("Ready to check\n");
 
     int i = 0;
     while (i < *n_tasks) {
@@ -362,18 +363,16 @@ TaskInfo *check_tasks_status(char *data_filename, TaskInfo *tasks, int *n_tasks)
         // status == 0 => task after now
         // status == 1 => task before now or now
 
-        printf("Checking task %s - status: %d\n", tasks[i].task, status);
+        log_info("Checking task %s - status: %d\n", tasks[i].task, status);
 
         if (status) {
             send_notification("Flashback", tasks[i].task);
-            printf("Removing task %s\n", tasks[i].task);
+            log_info("Removing task %s\n", tasks[i].task);
 
-            printf("Tasks pointer %p\n", tasks);
             tasks = free_task_from_memory(tasks, i, *n_tasks);
             (*n_tasks)--;
-            printf("Tasks pointer %p\n", tasks);
 
-            printf("Saving tasks - %d tasks\n", *n_tasks);
+            log_info("Saving tasks - %d tasks\n", *n_tasks);
             save_tasks(data_filename, "wb", tasks, *n_tasks);
 
             continue;
@@ -387,13 +386,13 @@ TaskInfo *check_tasks_status(char *data_filename, TaskInfo *tasks, int *n_tasks)
 
 void on_new_task(const char *message) {
     if (strlen(message) == 6) {
-        printf("Task removed, reloading from file\n");
+        log_info("Task removed, reloading from file\n");
         tasks = lift_data_file(DATA_FILENAME, &n_tasks);
         return;
     }
 
     TaskInfo *t = (TaskInfo *) message;
-    printf("Appending task '%s'\n", t->task);
+    log_info("Appending task '%s'\n", t->task);
 
     n_tasks++;
 
@@ -445,6 +444,8 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    log_init("flashback.log");
+
     if (!args.run) {
         if (args.list) {
             list_tasks(DATA_FILENAME);
@@ -456,7 +457,7 @@ int main(int argc, char *argv[]) {
             return 0;
         }
 
-        printf("Adding task %s\n", argv[args.task]);
+        log_info("Adding task %s\n", argv[args.task]);
         TaskInfo task = get_task(DATA_FILENAME, argv[args.task], argv[args.date], argv[args.time]);
         if (task.time <= 0) {
             print_help();
@@ -469,7 +470,7 @@ int main(int argc, char *argv[]) {
 
     char path[256];
     if (check_pipe_server(path, PIPE_NAME)) {
-        printf("Error: Pipe server already running\n");
+        log_error("Error: Pipe server already running\n");
         return -1;
     }
     // If the pipe server is already running, exit
@@ -480,9 +481,9 @@ int main(int argc, char *argv[]) {
 
         int status = pipecomm_start_server(PIPE_NAME, on_new_task);
         if (!status) {
-            printf("Tasks %d\n", n_tasks);
+            log_info("Tasks on queue: %d\n", n_tasks);
         } else {
-            printf("Error starting server\n");
+            log_error("Error starting server\n");
             return -1;
         }
 
@@ -490,6 +491,7 @@ int main(int argc, char *argv[]) {
     }
 
     free_memory(tasks);
+    log_close();
 
     return 0;
 }
