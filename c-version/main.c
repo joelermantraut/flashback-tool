@@ -1,5 +1,3 @@
-// TODO: Add logging system
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -336,6 +334,13 @@ TaskInfo get_task(char *data_filename, char *task, char *date, char* time) {
     return task_info;
 }
 
+int task_exists(TaskInfo *tasks, int n_tasks, const char *task) {
+    for (int i = 0; i < n_tasks; i++) {
+        if (strcmp(tasks[i].task, task) == 0) return i;
+    }
+    return -1;
+}
+
 TaskInfo *append_task(TaskInfo *tasks, int *n_tasks, TaskInfo task) {
     tasks = allocate_task_list(tasks, *n_tasks);
 
@@ -390,6 +395,13 @@ void on_new_task(const char *message) {
         tasks = lift_data_file(DATA_FILENAME, &n_tasks);
         return;
     }
+    // Checks for remove flag
+
+    if (task_exists(tasks, n_tasks, message) != -1) {
+        log_info("Task already exists, ignoring\n");
+        return;
+    }
+    // REDUNDANT CHECK. Checks if the task already exists
 
     TaskInfo *t = (TaskInfo *) message;
     log_info("Appending task '%s'\n", t->task);
@@ -421,16 +433,15 @@ void remove_task(char *data_filename, char *task) {
         return;
     }
 
-    for (int i = 0; i < n_tasks; i++) {
-        if (strcmp(tasks[i].task, task) == 0) {
-            tasks = free_task_from_memory(tasks, i, n_tasks);
-            n_tasks--;
-            save_tasks(data_filename, "wb", tasks, n_tasks);
-            pipecomm_send_struct(PIPE_NAME, "remove", sizeof("remove"));
-            printf("Task removed\n");
-            return;
-        }
-    }
+    int index = task_exists(tasks, n_tasks, task);
+    if (index == -1) return;
+
+    tasks = free_task_from_memory(tasks, index, n_tasks);
+    n_tasks--;
+    save_tasks(data_filename, "wb", tasks, n_tasks);
+    pipecomm_send_struct(PIPE_NAME, "remove", sizeof("remove"));
+    printf("Task removed\n");
+    return;
 }
 
 // Task management
@@ -463,6 +474,13 @@ int main(int argc, char *argv[]) {
             print_help();
             return -1;
         }
+
+        tasks = lift_data_file(DATA_FILENAME, &n_tasks);
+        if (task_exists(tasks, n_tasks, task.task) != -1) {
+            log_info("Task already exists, ignoring\n");
+            return -1;
+        }
+        // Checks if the task already exists
 
         pipecomm_send_struct(PIPE_NAME, &task, sizeof(TaskInfo));
         return 0;
